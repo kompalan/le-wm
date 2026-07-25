@@ -1,0 +1,11 @@
+[project]
+name = "le-wm"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "imageio>=2.37.4",
+    "stable-pretraining>=0.1.8",
+    "stable-worldmodel[all]>=0.1.1",
+]

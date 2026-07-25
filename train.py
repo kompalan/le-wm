@@ -88,7 +88,7 @@ def run(cfg):
         'model_opt': {
             "modules": 'model',
             "optimizer": dict(cfg.optimizer),
-            "scheduler": {"type": "LinearWarmupCosineAnnealingLR"},
+            "scheduler": {"type": "LinearWarmupCosineAnnealingLR", "warmup_steps": 10, "max_steps": 100},
             "interval": "epoch",
         },
     }
