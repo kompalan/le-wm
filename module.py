@@ -142,6 +142,7 @@ class Transformer(nn.Module):
         mlp_dim,
         dropout=0.0,
         block_class=Block,
+        is_embedding=False,
     ):
         super().__init__()
         self.norm = nn.LayerNorm(hidden_dim)
@@ -182,10 +183,121 @@ class Transformer(nn.Module):
             x = block(x) if isinstance(block, Block) else block(x, c)
         x = self.norm(x)
 
-        if hasattr(self, "output_proj"):
+        if not is_embedding and hasattr(self, "output_proj"):
             x = self.output_proj(x)
+            
         return x
 
+
+class TransformerEncoder(nn.Module):
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        output_dim,
+        depth,
+        heads,
+        dim_head,
+        mlp_dim,
+        dropout=0.1,
+        is_embedding=False,
+    ):
+        super().__init__()
+        self.norm = nn.LayerNorm(hidden_dim)
+        self.layers = nn.ModuleList([])
+
+        self.input_proj = (
+            nn.Linear(input_dim, hidden_dim)
+            if input_dim != hidden_dim
+            else nn.Identity()
+        )
+
+        for _ in range(depth):
+            self.layers.append(
+                Block(hidden_dim, heads, dim_head, mlp_dim, dropout)
+            )
+
+    def forward(self, x):
+        """
+        x: (batch, seq_len, action_dim)
+        """
+        if hasattr(self, "input_proj"):
+            x = self.input_proj(x)
+
+        for block in self.layers:
+            x = block(x)
+    
+        # Mean pool the hidden dim into a "gist" vector
+        # returned shape is: (batch, 1, embed_dim)
+        return x.mean(dim=1)
+    
+class TransformerDecoder(nn.Module):
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        output_dim,
+        depth,
+        heads,
+        dim_head,
+        mlp_dim,
+        dropout=0.1,
+    ):
+        super().__init__()
+        self.norm = nn.LayerNorm(hidden_dim)
+        self.layers = nn.ModuleList([])
+
+        self.input_proj = (
+            nn.Linear(input_dim, hidden_dim)
+            if input_dim != hidden_dim
+            else nn.Identity()
+        )
+
+        for _ in range(depth):
+            self.layers.append(
+                ConditionalBlock(hidden_dim, heads, dim_head, mlp_dim, dropout)
+            )
+
+    def forward(self, x, c=None):
+        """
+        x: (batch, sequence_dim, action_dim)
+        c: (batch, 1, embed_dim)
+        """
+
+        if hasattr(self, "input_proj"):
+            x = self.input_proj(x)
+
+        for block in self.layers:
+            x = block(x, c)
+        x = self.norm(x)
+
+        if not is_embedding and hasattr(self, "output_proj"):
+            x = self.output_proj(x)
+            
+        return x
+
+class Transpressor(nn.Module):
+    def __init__(
+        self,
+        input_dim,
+        hidden_dim,
+        output_dim,
+        depth,
+        heads,
+        dim_head,
+        mlp_dim,
+        dropout=0.1,
+    ):
+        super().__init__()
+        self.encoder = TransformerEncoder(input_dim, hidden_dim, output_dim, depth, heads, dim_head, mlp_dim, dropout)
+        self.decoder = TransformerEncoder(input_dim, hidden_dim, output_dim, depth, heads, dim_head, mlp_dim, dropout)
+        
+    def encode(self, x):
+        return self.encoder(x)
+    
+    def decode(self, x, c=None):
+        return self.decoder(x, c)
+    
 class Embedder(nn.Module):
     def __init__(
         self,
