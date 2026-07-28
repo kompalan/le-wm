@@ -11,6 +11,7 @@ num_workers: 6
 train_split: 0.9
 seed: 3072
 img_size: 224
+action_dim: 2
 embed_dim: 192
 history_size: 5
 
@@ -18,7 +19,7 @@ trainer:
   max_epochs: 100
   devices: auto
   accelerator: gpu
-  precision: bf16
+  precision: 64
   gradient_clip_val: 1.0
 
 loader:

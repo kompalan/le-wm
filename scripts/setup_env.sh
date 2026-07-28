@@ -1,6 +1,5 @@
 #!/bin/bash
 
-git checkout feature/auto_goal_set_via_vit
 apt-get install -y swig
 
 uv sync

@@ -8,4 +8,5 @@ dependencies = [
     "imageio>=2.37.4",
     "stable-pretraining>=0.1.8",
     "stable-worldmodel[all]>=0.1.1",
+    "wandb>=0.28.1",
 ]
