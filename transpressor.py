@@ -21,7 +21,7 @@ class FeedForward(nn.Module):
     def __init__(self, dim, hidden_dim, dropout=0.0):
         super().__init__()
         self.net = nn.Sequential(
-            nn.LayerNorm(dim),
+            # nn.LayerNorm(dim),
             nn.Linear(dim, hidden_dim),
             nn.GELU(),
             nn.Dropout(dropout),
@@ -43,7 +43,7 @@ class Attention(nn.Module):
         self.heads = heads
         self.scale = dim_head**-0.5
         self.dropout = dropout
-        self.norm = nn.LayerNorm(dim)
+        # self.norm = nn.LayerNorm(dim)
         self.attend = nn.Softmax(dim=-1)
         self.to_qkv = nn.Linear(dim, inner_dim * 3, bias=False)
         self.to_out = (
@@ -56,7 +56,7 @@ class Attention(nn.Module):
         """
         x : (B, T, D)
         """
-        x = self.norm(x)
+        # x = self.norm(x)
         drop = self.dropout if self.training else 0.0
         qkv = self.to_qkv(x).chunk(3, dim=-1)  # q, k, v: (B, heads, T, dim_head)
         q, k, v = (rearrange(t, "b t (h d) -> b h t d", h=self.heads) for t in qkv)
@@ -108,86 +108,86 @@ class Block(nn.Module):
         return x
 
 
-class Transformer(nn.Module):
-    """Standard Transformer with support for AdaLN-zero blocks"""
+# class Transformer(nn.Module):
+#     """Standard Transformer with support for AdaLN-zero blocks"""
 
-    def __init__(
-        self,
-        input_dim,
-        hidden_dim,
-        output_dim,
-        depth,
-        heads,
-        dim_head,
-        mlp_dim,
-        dropout=0.0,
-        block_class=Block,
-        is_embedding=False,
-    ):
-        super().__init__()
-        self.norm = nn.LayerNorm(hidden_dim)
-        self.layers = nn.ModuleList([])
-        self.is_embedding = is_embedding
+#     def __init__(
+#         self,
+#         input_dim,
+#         hidden_dim,
+#         output_dim,
+#         depth,
+#         heads,
+#         dim_head,
+#         mlp_dim,
+#         dropout=0.0,
+#         block_class=Block,
+#         is_embedding=False,
+#     ):
+#         super().__init__()
+#         self.norm = nn.LayerNorm(hidden_dim)
+#         self.layers = nn.ModuleList([])
+#         self.is_embedding = is_embedding
 
-        self.input_proj = (
-            nn.Linear(input_dim, hidden_dim)
-        )
+#         self.input_proj = (
+#             nn.Linear(input_dim, hidden_dim)
+#         )
 
-        self.cond_proj = (
-            nn.Linear(input_dim, hidden_dim)
-        )
+#         self.cond_proj = (
+#             nn.Linear(input_dim, hidden_dim)
+#         )
 
-        self.output_proj = (
-            nn.Linear(hidden_dim, output_dim)
-        )
+#         self.output_proj = (
+#             nn.Linear(hidden_dim, output_dim)
+#         )
 
-        for _ in range(depth):
-            self.layers.append(
-                block_class(hidden_dim, heads, dim_head, mlp_dim, dropout)
-            )
+#         for _ in range(depth):
+#             self.layers.append(
+#                 block_class(hidden_dim, heads, dim_head, mlp_dim, dropout)
+#             )
 
-    def forward(self, x, c=None):
+#     def forward(self, x, c=None):
 
-        if hasattr(self, "input_proj"):
-            x = self.input_proj(x)
+#         if hasattr(self, "input_proj"):
+#             x = self.input_proj(x)
 
-        if c is not None and hasattr(self, "cond_proj"):
-            c = self.cond_proj(c)
+#         if c is not None and hasattr(self, "cond_proj"):
+#             c = self.cond_proj(c)
 
-        for block in self.layers:
-            x = block(x) if isinstance(block, Block) else block(x, c)
-        x = self.norm(x)
+#         for block in self.layers:
+#             x = block(x) if isinstance(block, Block) else block(x, c)
+#         x = self.norm(x)
 
-        if not self.is_embedding and hasattr(self, "output_proj"):
-            x = self.output_proj(x)
+#         if not self.is_embedding and hasattr(self, "output_proj"):
+#             x = self.output_proj(x)
             
-        return x
+#         return x
 
-class MLP(nn.Module):
-    """Simple MLP with optional normalization and activation"""
+# class MLP(nn.Module):
+#     """Simple MLP with optional normalization and activation"""
 
-    def __init__(
-        self,
-        input_dim,
-        hidden_dim,
-        output_dim=None,
-        norm_fn=nn.LayerNorm,
-        act_fn=nn.GELU,
-    ):
-        super().__init__()
-        norm_fn = norm_fn(hidden_dim) if norm_fn is not None else nn.Identity()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            norm_fn,
-            act_fn(),
-            nn.Linear(hidden_dim, output_dim or input_dim),
-        )
+#     def __init__(
+#         self,
+#         input_dim,
+#         hidden_dim,
+#         output_dim=None,
+#         norm_fn=nn.LayerNorm,
+#         act_fn=nn.GELU,
+#     ):
+#         super().__init__()
+#         norm_fn = norm_fn(hidden_dim) if norm_fn is not None else nn.Identity()
+#         self.net = nn.Sequential(
+#             nn.Linear(input_dim, hidden_dim),
+#             norm_fn,
+#             act_fn(),
+#             nn.Linear(hidden_dim, output_dim or input_dim),
+#         )
 
-    def forward(self, x):
-        """
-        x: (B*T, D)
-        """
-        return self.net(x)
+#     def forward(self, x):
+#         """
+#         x: (B*T, D)
+#         """
+#         return self.net(x)
 
 class TransformerEncoder(nn.Module):
     def __init__(
@@ -223,15 +223,19 @@ class TransformerEncoder(nn.Module):
         x: (batch, seq_len, action_dim)
         """
         _, seq_len, _ = x.shape
-        
+
         x = self.input_proj(x)
         x = x + self.pos_enc(torch.arange(seq_len, device=x.device))
-        
+
         for block in self.layers:
             x = block(x)
-    
-        # Mean pool the hidden dim into a "gist" vector
-        # returned shape is: (batch, 1, embed_dim)
+
+        # Compute prefix mean pools: for each timestep t return the mean
+        # over positions [0..t]. Returned shape is (batch, seq_len, embed_dim)
+        # cumsum = x.cumsum(dim=1)
+        # counts = torch.arange(1, seq_len + 1, device=x.device).view(1, seq_len, 1)
+        # return cumsum / counts
+        
         return x.mean(dim=1, keepdim=True)
     
 class TransformerDecoder(nn.Module):
@@ -325,6 +329,7 @@ def compressor_forward(self, batch, stage, cfg):
     decoded = self.model.decode(actions, encoded)
 
     # Predict the next action token from the summary plus the preceding context.
+    # Take the first seq_len-1 tokens and compare it to a shifted version of actions[1:]
     pred_tokens = decoded[:, :-1]
     target_tokens = actions[:, 1:]
     loss = F.mse_loss(pred_tokens, target_tokens)
