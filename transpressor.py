@@ -107,88 +107,6 @@ class Block(nn.Module):
         x = x + self.mlp(self.norm2(x))
         return x
 
-
-# class Transformer(nn.Module):
-#     """Standard Transformer with support for AdaLN-zero blocks"""
-
-#     def __init__(
-#         self,
-#         input_dim,
-#         hidden_dim,
-#         output_dim,
-#         depth,
-#         heads,
-#         dim_head,
-#         mlp_dim,
-#         dropout=0.0,
-#         block_class=Block,
-#         is_embedding=False,
-#     ):
-#         super().__init__()
-#         self.norm = nn.LayerNorm(hidden_dim)
-#         self.layers = nn.ModuleList([])
-#         self.is_embedding = is_embedding
-
-#         self.input_proj = (
-#             nn.Linear(input_dim, hidden_dim)
-#         )
-
-#         self.cond_proj = (
-#             nn.Linear(input_dim, hidden_dim)
-#         )
-
-#         self.output_proj = (
-#             nn.Linear(hidden_dim, output_dim)
-#         )
-
-#         for _ in range(depth):
-#             self.layers.append(
-#                 block_class(hidden_dim, heads, dim_head, mlp_dim, dropout)
-#             )
-
-#     def forward(self, x, c=None):
-
-#         if hasattr(self, "input_proj"):
-#             x = self.input_proj(x)
-
-#         if c is not None and hasattr(self, "cond_proj"):
-#             c = self.cond_proj(c)
-
-#         for block in self.layers:
-#             x = block(x) if isinstance(block, Block) else block(x, c)
-#         x = self.norm(x)
-
-#         if not self.is_embedding and hasattr(self, "output_proj"):
-#             x = self.output_proj(x)
-            
-#         return x
-
-# class MLP(nn.Module):
-#     """Simple MLP with optional normalization and activation"""
-
-#     def __init__(
-#         self,
-#         input_dim,
-#         hidden_dim,
-#         output_dim=None,
-#         norm_fn=nn.LayerNorm,
-#         act_fn=nn.GELU,
-#     ):
-#         super().__init__()
-#         norm_fn = norm_fn(hidden_dim) if norm_fn is not None else nn.Identity()
-#         self.net = nn.Sequential(
-#             nn.Linear(input_dim, hidden_dim),
-#             norm_fn,
-#             act_fn(),
-#             nn.Linear(hidden_dim, output_dim or input_dim),
-#         )
-
-#     def forward(self, x):
-#         """
-#         x: (B*T, D)
-#         """
-#         return self.net(x)
-
 class TransformerEncoder(nn.Module):
     def __init__(
         self,
@@ -232,11 +150,11 @@ class TransformerEncoder(nn.Module):
 
         # Compute prefix mean pools: for each timestep t return the mean
         # over positions [0..t]. Returned shape is (batch, seq_len, embed_dim)
-        # cumsum = x.cumsum(dim=1)
-        # counts = torch.arange(1, seq_len + 1, device=x.device).view(1, seq_len, 1)
-        # return cumsum / counts
+        cumsum = x.cumsum(dim=1)
+        counts = torch.arange(1, seq_len + 1, device=x.device).view(1, seq_len, 1)
+        return cumsum / counts
         
-        return x.mean(dim=1, keepdim=True)
+        # return x.mean(dim=1, keepdim=True)
     
 class TransformerDecoder(nn.Module):
     def __init__(
@@ -317,16 +235,36 @@ class Transpressor(nn.Module):
 def compressor_forward(self, batch, stage, cfg):
     """Encode a sequence into a summary vector and train a decoder to reconstruct it."""
     actions = batch["action"].float()
-    batch_size, seq_len, act_dim = actions.shape
+    batch_size, _, act_dim = actions.shape
     device = actions.device
 
     # Add sequence delimiters so the decoder can learn a bounded reconstruction target.
     start_padding = torch.full((batch_size, 1, act_dim), -2.0, device=device)
     end_padding = torch.full((batch_size, 1, act_dim), -3.0, device=device)
     actions = torch.cat([start_padding, actions, end_padding], dim=1)
+    
+    # Using the encoder, encode the sequence into T summaries, each element 
+    # acting as a summary statistic for the :T preceding vectors
+    _, T, _ = actions.shape
+    encoded = self.model.encode(actions) # (B, T, D)
+    
+    # Each summary statistic will be used as one conditioning vector 
+    encoded = rearrange(encoded, "b t d -> (b t) d") # (B*T, D)
+    encoded = encoded.unsqueeze(1) # (B*T, 1, D)
+    
+    actions = actions.repeat_interleave(T, dim=0) # (B*T, T, D)
+    decoded = self.model.decode(actions, encoded) # (B*T, T, D)
+    
+    actions = actions.view(batch_size, T, T, act_dim)
+    decoded = decoded.view(batch_size, T, T, act_dim)
 
-    encoded = self.model.encode(actions)
-    decoded = self.model.decode(actions, encoded)
+    mask = torch.tril(torch.ones(T, T, dtype=torch.bool, device=device)).view(T, T, 1)
+    
+    actions = torch.where(mask, actions, torch.zeros_like(actions, device=device))
+    actions = rearrange(actions, "b t1 t2 d -> (b t1) t2 d", t1=T)
+    
+    decoded = torch.where(mask, decoded, torch.zeros_like(decoded, device=device))
+    decoded = rearrange(decoded, "b t1 t2 d -> (b t1) t2 d", t1=T)
 
     # Predict the next action token from the summary plus the preceding context.
     # Take the first seq_len-1 tokens and compare it to a shifted version of actions[1:]

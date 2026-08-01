@@ -5,7 +5,7 @@ defaults:
   - override /hydra/launcher: basic
 
 wandb:
-  enabled: True
+  enabled: False
   config:
     entity: anuragkompalli
     project: transpressor
