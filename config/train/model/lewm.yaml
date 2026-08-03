@@ -22,9 +22,15 @@ predictor:
   emb_dropout: 0.0
 
 action_encoder:
-  _target_: module.Embedder
-  input_dim: ???
-  emb_dim: ${embed_dim}
+  _target_: transpressor.Transpressor
+  input_dim: ${action_dim}
+  hidden_dim: ${embed_dim}
+  output_dim: ${action_dim}
+  depth: 6
+  heads: 16
+  mlp_dim: 2048
+  dim_head: 64
+  dropout: 0.1
 
 projector:
   _target_: module.MLP

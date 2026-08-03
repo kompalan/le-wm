@@ -141,8 +141,7 @@ class Transformer(nn.Module):
         dim_head,
         mlp_dim,
         dropout=0.0,
-        block_class=Block,
-        is_embedding=False,
+        block_class=Block
     ):
         super().__init__()
         self.norm = nn.LayerNorm(hidden_dim)
@@ -183,8 +182,7 @@ class Transformer(nn.Module):
             x = block(x) if isinstance(block, Block) else block(x, c)
         x = self.norm(x)
 
-        if not is_embedding and hasattr(self, "output_proj"):
-            x = self.output_proj(x)
+        x = self.output_proj(x)
             
         return x
 

@@ -40,10 +40,12 @@ class JEPA(nn.Module):
         info["emb"] = rearrange(emb, "(b t) d -> b t d", b=b)
 
         if "action" in info:
-            info["act_emb"] = self.action_encoder(info["action"])
-
+            actions = info["action"].float()
+            info["act_emb"] = self.action_encoder.encode(actions)
+            
         return info
-
+    
+ 
     def predict(self, emb, act_emb):
         """Predict next state embedding
         emb: (B, T, D)

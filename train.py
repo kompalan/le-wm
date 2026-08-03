@@ -7,6 +7,7 @@ import lightning as pl
 import stable_pretraining as spt
 import stable_worldmodel as swm
 import torch
+import torch.nn.functional as F
 from lightning.pytorch.loggers import WandbLogger
 from omegaconf import OmegaConf, open_dict
 
@@ -23,22 +24,33 @@ def lejepa_forward(self, batch, stage, cfg):
 
     # Replace NaN values with 0 (occurs at sequence boundaries)
     batch["action"] = torch.nan_to_num(batch["action"], 0.0)
+    batch["action"] = batch["action"][:, :ctx_len]
+    batch_size, seq_len, act_dim = batch["action"].shape
+    device = batch["action"].device
 
+    # Add sequence delimiters so the decoder can learn a bounded reconstruction target.
+    start_padding = torch.full((batch_size, 1, act_dim), -2.0, device=device)
+    end_padding = torch.full((batch_size, 1, act_dim), -3.0, device=device)
+    batch["action"] = torch.cat([start_padding, batch["action"], end_padding], dim=1)
     output = self.model.encode(batch)
 
     emb = output["emb"]  # (B, T, D)
     act_emb = output["act_emb"]
 
     ctx_emb = emb[:, :ctx_len]
-    ctx_act = act_emb[:, : ctx_len]
+    ctx_act = act_emb
 
     tgt_emb = emb[:, n_preds:] # label
     pred_emb = self.model.predict(ctx_emb, ctx_act) # pred
+    
+    act_reconst = self.model.action_encoder.decode(batch["action"], ctx_act) # reconstruction 
 
     # LeWM loss
     output["pred_loss"] = (pred_emb - tgt_emb).pow(2).mean()
     output["sigreg_loss"]= self.sigreg(emb.transpose(0, 1))
-    output["loss"] = output["pred_loss"] + lambd * output["sigreg_loss"]  
+    output["reconstruction_loss"] = F.mse_loss(act_reconst[:, :-1], batch["action"][:, 1:])
+    output["sigreg_loss_encoder"] = self.sigreg(act_emb.transpose(0, 1))
+    output["loss"] = output["pred_loss"] + output["reconstruction_loss"] + lambd * output["sigreg_loss"] + lambd * output["sigreg_loss_encoder"] 
 
     losses_dict = {f"{stage}/{k}": v.detach() for k, v in output.items() if "loss" in k}
     self.log_dict(losses_dict, on_step=True, sync_dist=True)
