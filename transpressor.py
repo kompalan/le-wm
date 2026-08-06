@@ -117,7 +117,7 @@ class TransformerEncoder(nn.Module):
         dim_head,
         mlp_dim,
         dropout=0.1,
-        sequence_dim=8
+        sequence_dim=7
     ):
         super().__init__()
         # self.norm = nn.LayerNorm(hidden_dim)
@@ -135,6 +135,8 @@ class TransformerEncoder(nn.Module):
             self.layers.append(
                 Block(hidden_dim, heads, dim_head, mlp_dim, dropout)
             )
+            
+        self.mlp = FeedForward(hidden_dim, mlp_dim, dropout=dropout)
 
     def forward(self, x):
         """
@@ -154,7 +156,8 @@ class TransformerEncoder(nn.Module):
         # counts = torch.arange(1, seq_len + 1, device=x.device).view(1, seq_len, 1)
         # return cumsum / counts
         
-        return x.mean(dim=1, keepdim=True)
+        means = x.mean(dim=1, keepdim=True)
+        return self.mlp(means), means
     
 class TransformerDecoder(nn.Module):
     def __init__(
@@ -167,9 +170,11 @@ class TransformerDecoder(nn.Module):
         dim_head,
         mlp_dim,
         dropout=0.1,
-        sequence_dim=8
+        sequence_dim=7
     ):
         super().__init__()
+        
+        self.input_norm = nn.LayerNorm(hidden_dim)
         self.norm = nn.LayerNorm(hidden_dim)
         self.layers = nn.ModuleList([])
 
@@ -190,12 +195,17 @@ class TransformerDecoder(nn.Module):
                 ConditionalBlock(hidden_dim, heads, dim_head, mlp_dim, dropout)
             )
 
+        self.mlp = FeedForward(hidden_dim, mlp_dim, dropout=dropout)
+
     def forward(self, x, c=None):
         """
         x: (batch, sequence_dim, action_dim)
         c: (batch, 1, embed_dim)
         """
         _, seq_len, _ = x.shape
+        
+        c = self.mlp(c)
+        c = self.input_norm(c)
         
         x = self.input_proj(x)
         x = x + self.pos_enc(torch.arange(seq_len, device=x.device))

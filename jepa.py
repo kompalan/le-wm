@@ -41,7 +41,10 @@ class JEPA(nn.Module):
 
         if "action" in info:
             actions = info["action"].float()
-            info["act_emb"] = self.action_encoder.encode(actions)
+            actions = actions.flatten(0, 1)
+            act_emb, means = self.action_encoder.encode(actions)
+            info["act_emb"] = act_emb
+            info["act_means"] = means
             
         return info
     
@@ -70,7 +73,16 @@ class JEPA(nn.Module):
 
         assert "pixels" in info, "pixels not in info_dict"
         H = info["pixels"].size(2)
-        B, S, T = action_sequence.shape[:3]
+        B, S, T, A = action_sequence.shape
+        
+        device = action_sequence.device
+        action_sequence = action_sequence.view(B, S, T, -1, 2)
+        B, S, T, D, A = action_sequence.shape
+        
+        start_padding = torch.full((B, S, T, 1, A), -2.0, device=device)
+        end_padding = torch.full((B, S, T, 1, A), -3.0, device=device)
+        action_sequence = torch.cat([start_padding, action_sequence, end_padding], dim=3)
+                
         act_0, act_future = torch.split(action_sequence, [H, T - H], dim=2)
         info["action"] = act_0
         n_steps = T - H
@@ -89,9 +101,10 @@ class JEPA(nn.Module):
         # rollout predictor autoregressively for n_steps
         HS = history_size
         for t in range(n_steps):
-            act_emb = self.action_encoder(act)
+            act_emb, _ = self.action_encoder.encode(act)
             emb_trunc = emb[:, -HS:]  # (BS, HS, D)
             act_trunc = act_emb[:, -HS:]  # (BS, HS, A_emb)
+            # act_trunc = act_emb
             pred_emb = self.predict(emb_trunc, act_trunc)[:, -1:]  # (BS, 1, D)
             emb = torch.cat([emb, pred_emb], dim=1)  # (BS, T+1, D)
 
@@ -99,7 +112,7 @@ class JEPA(nn.Module):
             act = torch.cat([act, next_act], dim=1)  # (BS, T+1, action_dim)
 
         # predict the last state
-        act_emb = self.action_encoder(act)  # (BS, T, A_emb)
+        act_emb, _ = self.action_encoder.encode(act)  # (BS, T, A_emb)
         emb_trunc = emb[:, -HS:]  # (BS, HS, D)
         act_trunc = act_emb[:, -HS:]  # (BS, HS, A_emb)
         pred_emb = self.predict(emb_trunc, act_trunc)[:, -1:]  # (BS, 1, D)
