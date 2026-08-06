@@ -73,6 +73,8 @@ class JEPA(nn.Module):
 
         assert "pixels" in info, "pixels not in info_dict"
         H = info["pixels"].size(2)
+        b_orig, s_orig, t_orig, a_orig = action_sequence.shape
+        
         B, S, T, A = action_sequence.shape
         
         device = action_sequence.device
@@ -101,7 +103,11 @@ class JEPA(nn.Module):
         # rollout predictor autoregressively for n_steps
         HS = history_size
         for t in range(n_steps):
+            B, S, T, D = act.shape
+            act = act.flatten(0, 1)
             act_emb, _ = self.action_encoder.encode(act)
+            act = act.unflatten(0, (B, S))
+            act_emb = act_emb.squeeze(1).unflatten(0, (B, S))
             emb_trunc = emb[:, -HS:]  # (BS, HS, D)
             act_trunc = act_emb[:, -HS:]  # (BS, HS, A_emb)
             # act_trunc = act_emb
@@ -112,14 +118,20 @@ class JEPA(nn.Module):
             act = torch.cat([act, next_act], dim=1)  # (BS, T+1, action_dim)
 
         # predict the last state
+        act_b, act_s, _, _ = act.shape
+        act = act.flatten(0, 1)
         act_emb, _ = self.action_encoder.encode(act)  # (BS, T, A_emb)
+        act = act.unflatten(0, (act_b, act_s))
+        act_emb = act_emb.squeeze(1).unflatten(0, (act_b, act_s))
+        
         emb_trunc = emb[:, -HS:]  # (BS, HS, D)
         act_trunc = act_emb[:, -HS:]  # (BS, HS, A_emb)
         pred_emb = self.predict(emb_trunc, act_trunc)[:, -1:]  # (BS, 1, D)
         emb = torch.cat([emb, pred_emb], dim=1)
-
+        B, S, D = emb.shape
+        
         # unflatten batch and sample dimensions
-        pred_rollout = rearrange(emb, "(b s) ... -> b s ...", b=B, s=S)
+        pred_rollout = rearrange(emb, "(b s) ... -> b s ...", b=b_orig, s=s_orig)
         info["predicted_emb"] = pred_rollout
 
         return info
