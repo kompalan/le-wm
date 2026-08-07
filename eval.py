@@ -25,6 +25,17 @@ def img_transform(cfg):
     )
     return transform
 
+def goal_transform(cfg):
+    transform = transforms.Compose(
+        [
+            transforms.ToImage(),
+            transforms.ToDtype(torch.float32, scale=True),
+            transforms.Lambda(lambda x: x.permute(2, 0, 1) if x.shape[0] != 3 else x),
+            transforms.Normalize(**spt.data.dataset_stats.ImageNet),
+            transforms.Resize(size=cfg.eval.img_size),
+        ]
+    )
+    return transform
 
 def get_episodes_length(dataset, episodes):
     col_name = "episode_idx" if "episode_idx" in dataset.column_names else "ep_idx"
@@ -151,6 +162,18 @@ def run(cfg: DictConfig):
         callables=OmegaConf.to_container(cfg.eval.get("callables"), resolve=True),
         video=results_path,
     )
+    
+    # metrics = world.evaluate(
+    #     episodes=1,
+    #     # start_steps=eval_start_idx.tolist(),
+    #     # goal_offset=cfg.eval.goal_offset_steps,
+    #     # eval_budget=cfg.eval.eval_budget,
+    #     # episodes_idx=eval_episodes.tolist(),
+    #     # callables=OmegaConf.to_container(cfg.eval.get("callables"), resolve=True),
+    #     video=results_path,
+    #     reset_mode="wait",
+    #     seed=42
+    # )
     end_time = time.time()
     
     print(metrics)

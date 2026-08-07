@@ -41,7 +41,7 @@ class JEPA(nn.Module):
 
         if "action" in info:
             actions = info["action"].float()
-            actions = actions.flatten(0, 1)
+            # actions = actions.flatten(0, 1)
             act_emb, means = self.action_encoder.encode(actions)
             info["act_emb"] = act_emb
             info["act_means"] = means

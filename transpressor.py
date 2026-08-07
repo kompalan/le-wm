@@ -156,8 +156,10 @@ class TransformerEncoder(nn.Module):
         # counts = torch.arange(1, seq_len + 1, device=x.device).view(1, seq_len, 1)
         # return cumsum / counts
         
-        means = x.mean(dim=1, keepdim=True)
-        return self.mlp(means), means
+        # means = x.mean(dim=1, keepdim=True)
+        last = x[:, -1:, :]
+        
+        return self.mlp(last), last
     
 class TransformerDecoder(nn.Module):
     def __init__(
