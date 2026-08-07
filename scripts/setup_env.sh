@@ -11,7 +11,12 @@ curl --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/huggingfa
 
 
 mkdir -p ~/.stable_worldmodel/datasets/
-git clone https://huggingface.co/datasets/quentinll/lewm-pusht ~/.stable_worldmodel/datasets/pusht
-unzstd ~/.stable_worldmodel/datasets/pusht/pusht_expert_train.h5.zst
 
-mv ~/.stable_worldmodel/datasets/pusht/pusht_expert_train.h5 ~/.stable_worldmodel/datasets/pusht_expert_train.h5
+# git clone https://huggingface.co/datasets/quentinll/lewm-pusht ~/.stable_worldmodel/datasets/pusht
+# unzstd ~/.stable_worldmodel/datasets/pusht/pusht_expert_train.h5.zst
+
+git clone https://huggingface.co/datasets/quentinll/lewm-cube ~/.stable_worldmodel/datasets/ogbench
+unzstd ~/.stable_worldmodel/datasets/ogbench/cube_single_expert.h5.zst
+
+# mv ~/.stable_worldmodel/datasets/pusht/pusht_expert_train.h5 ~/.stable_worldmodel/datasets/pusht_expert_train.h5
+mv ~/.stable_worldmodel/datasets/pusht/cube_single_expert.h5 ~/.stable_worldmodel/datasets/cube_single_expert.h5
