@@ -41,10 +41,14 @@ class JEPA(nn.Module):
 
         if "action" in info:
             actions = info["action"].float()
+            B, S, D = actions.shape
+            actions = actions.view(B, S, -1, 2)
             actions = actions.flatten(0, 1)
             act_emb, means = self.action_encoder.encode(actions)
+            act_emb = act_emb.squeeze(1).unflatten(0, (B, S))
             info["act_emb"] = act_emb
             info["act_means"] = means
+            info["act_reshaped"] = actions
             
         return info
     

@@ -21,13 +21,15 @@ def lejepa_forward(self, batch, stage, cfg):
     ctx_len = cfg.history_size
     n_preds = cfg.num_preds
     lambd = cfg.loss.sigreg.weight
-
+    action_dim = cfg.action_dim
+    
     # Replace NaN values with 0 (occurs at sequence boundaries)
     batch["action"] = torch.nan_to_num(batch["action"], 0.0)
     batch["action"] = batch["action"][:, :ctx_len]
     batch_size, seq_len, act_dim = batch["action"].shape
     device = batch["action"].device
-
+    B, S, D = batch["action"].shape
+    
     # Add sequence delimiters so the decoder can learn a bounded reconstruction target.
     start_padding = torch.full((batch_size, 1, act_dim), -2.0, device=device)
     end_padding = torch.full((batch_size, 1, act_dim), -3.0, device=device)
@@ -38,18 +40,22 @@ def lejepa_forward(self, batch, stage, cfg):
     act_emb = output["act_emb"]
 
     ctx_emb = emb[:, :ctx_len]
-    ctx_act = act_emb
+    ctx_act = act_emb[:, :ctx_len]
 
     tgt_emb = emb[:, n_preds:] # label
     pred_emb = self.model.predict(ctx_emb, ctx_act) # pred
     
-    act_reconst = self.model.action_encoder.decode(batch["action"], ctx_act) # reconstruction 
+    flattened_actions = batch["action"][:, :ctx_len, :].view(B, S, -1, 2).flatten(0, 1)
+    act_reconst = self.model.action_encoder.decode(
+        flattened_actions, 
+        ctx_act.flatten(0, 1).unsqueeze(1)
+    ) # reconstruction 
 
     # LeWM loss
     output["pred_loss"] = (pred_emb - tgt_emb).pow(2).mean()
     output["sigreg_loss"]= self.sigreg(emb.transpose(0, 1))
-    output["reconstruction_loss"] = F.mse_loss(act_reconst[:, :-1], batch["action"][:, 1:])
-    output["sigreg_loss_encoder"] = self.sigreg(act_emb.transpose(0, 1))
+    output["reconstruction_loss"] = F.mse_loss(act_reconst[:, :-1], flattened_actions[:, 1:])
+    output["sigreg_loss_encoder"] = self.sigreg(ctx_act.transpose(0, 1))
     output["loss"] = output["pred_loss"] + output["reconstruction_loss"] + lambd * output["sigreg_loss"] + lambd * output["sigreg_loss_encoder"] 
 
     losses_dict = {f"{stage}/{k}": v.detach() for k, v in output.items() if "loss" in k}
@@ -77,7 +83,7 @@ def run(cfg):
             normalizer = get_column_normalizer(dataset, col, col)
             transforms.append(normalizer)
 
-        cfg.model.action_encoder.input_dim = cfg.data.dataset.frameskip * dataset.get_dim("action")
+        # cfg.model.action_encoder.input_dim = cfg.data.dataset.frameskip * dataset.get_dim("action")
 
     transform = spt.data.transforms.Compose(*transforms)
     dataset.transform = transform
