@@ -34,7 +34,10 @@ def lejepa_forward(self, batch, stage, cfg):
     start_padding = torch.full((batch_size, 1, act_dim), -2.0, device=device)
     end_padding = torch.full((batch_size, 1, act_dim), -3.0, device=device)
     batch["action"] = torch.cat([start_padding, batch["action"], end_padding], dim=1)
+    batch["action"] = batch["action"].view(B, S, -1, 2)
+    batch["action"] = batch["action"].flatten(0, 1)
     output = self.model.encode(batch)
+    output["act_emb"] = output["act_emb"].squeeze(1).unflatten(0, (B, S))
 
     emb = output["emb"]  # (B, T, D)
     act_emb = output["act_emb"]
