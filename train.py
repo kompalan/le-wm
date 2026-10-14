@@ -122,6 +122,7 @@ def run(cfg):
 
     object_dump_callback = SaveCkptCallback(
         run_name=cfg.output_model_name, cfg=cfg.model, epoch_interval=1,
+        hf_repo_id=cfg.hf_hub.repo_id, hf_private=cfg.hf_hub.private,
     )
 
     trainer = pl.Trainer(

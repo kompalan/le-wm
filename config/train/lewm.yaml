@@ -7,6 +7,11 @@ defaults:
 output_model_name: lewm
 subdir: ${hydra:job.id}
 
+# push each epoch's weights to the HuggingFace Hub (needs `hf auth login` or HF_TOKEN)
+hf_hub:
+  repo_id: null  # e.g. <username>/lewm-pusht; null disables uploading
+  private: True
+
 num_workers: 6
 train_split: 0.9
 seed: 3072
