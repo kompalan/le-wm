@@ -2,6 +2,9 @@ import os
 from functools import partial
 from pathlib import Path
 
+import hdf5plugin
+import h5py
+
 import hydra
 import lightning as pl
 import stable_pretraining as spt

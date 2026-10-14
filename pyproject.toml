@@ -1,0 +1,15 @@
+[project]
+name = "le-wm"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "einops>=0.8.2",
+    "h5py>=3.16.0",
+    "hdf5plugin>=7.1.0",
+    "imageio>=2.38.1",
+    "stable-pretraining>=0.1.8",
+    "stable-worldmodel>=0.1.1",
+    "torch>=2.9",
+]
