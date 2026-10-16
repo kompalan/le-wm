@@ -180,5 +180,21 @@ PY
 
 After conversion, load via `swm.policy.AutoCostModel('pusht/lewm')` as usual.
 
+## MiniWoB++ (web UI) experiments
+
+A first out-of-domain target: [MiniWoB++](https://github.com/Farama-Foundation/miniwob-plusplus) web tasks, driven through headless Chrome (needs Google Chrome installed; Selenium fetches the driver).
+
+- `miniwob_env.py`: pixel-only gym env (`swm/MiniWoB-v0`). The observation is the 210x160 page screenshot, padded to a square and resized to 224. The action is one click at `(x, y) ∈ [-1, 1]²` over the task area. Covers four multi-step click tasks: `click-checkboxes`, `click-option`, `click-collapsible`, `click-tab-2`. Single-click tasks end after one action, which is shorter than a training window.
+- `collect_miniwob.py`: no public MiniWoB++ dataset has screenshots (the Stanford human demos are DOM/event logs), so this script generates one. It mixes scripted-expert, random-element and uniform clicks and writes `$STABLEWM_HOME/datasets/miniwob_click.h5`.
+- `demo_miniwob.py`: goal-conditioned MPC. The goal image is the expert's state just before Submit on a held-out seed. The planner is CEM over click sequences, scored by LeWM latent distance. Success means the page state matches the goal.
+
+```bash
+export STABLEWM_HOME=$PWD
+python collect_miniwob.py --episodes-per-task 750 --workers 8          # ~4 min, ~35k frames
+python train.py data=miniwob output_model_name=lewm_miniwob subdir=miniwob \
+    trainer.accelerator=mps trainer.precision=32 trainer.max_epochs=15  # drop the mps/precision overrides on GPU
+python demo_miniwob.py --policy lewm_miniwob/weights_epoch_15.pt       # + --policy random for the baseline
+```
+
 ## Contact & Contributions
 Feel free to open [issues](https://github.com/lucas-maes/le-wm/issues)! For questions or collaborations, please contact `lucas.maes@mila.quebec`

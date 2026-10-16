@@ -1,2 +1,7 @@
 __pycache__/
 data/
+checkpoints/
+wandb/
+results/
+datasets/
+.DS_Store
