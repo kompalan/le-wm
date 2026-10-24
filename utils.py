@@ -30,8 +30,67 @@ def get_column_normalizer(dataset, source: str, target: str):
     data = torch.from_numpy(np.array(col_data))
     data = data[~torch.isnan(data).any(dim=1)]
     mean = data.mean(0, keepdim=True).clone()
-    std = data.std(0, keepdim=True).clone()
+    std = data.std(0, keepdim=True).clamp_min(1e-6).clone()  # constant columns (unused action slots) -> 0
     return dt.transforms.WrapTorchTransform(ZScoreNormalizer(mean, std), source=source, target=target)
+
+def holdout_groups(dataset, col: str, frac: float, seed: int):
+    """Values of `col` (e.g. task_idx) whose episodes go to validation: a seeded
+    random `frac` of the distinct values, so no held-out group is seen in training."""
+    per_ep = np.asarray(dataset.get_col_data(col))[np.asarray(dataset.offsets)]
+    groups = np.unique(per_ep)
+    rng = np.random.default_rng(seed)
+    held = rng.permutation(groups)[: int(round(frac * len(groups)))]
+    return per_ep, set(held.tolist())
+
+
+def group_split(dataset, col: str, frac: float, seed: int):
+    """(train, val) Subsets of `dataset` split by whole groups of `col`."""
+    from stable_pretraining.data import Subset
+
+    per_ep, held = holdout_groups(dataset, col, frac, seed)
+    train, val = [], []
+    for i, (ep, _) in enumerate(dataset.clip_indices):
+        (val if per_ep[ep] in held else train).append(i)
+    return Subset(dataset, train), Subset(dataset, val), sorted(held)
+
+
+class EpisodeBatchSampler(torch.utils.data.Sampler):
+    """Batches made of chunks of `windows_per_episode` windows from the same
+    episode, so each batch holds ~batch_size / windows_per_episode episodes.
+
+    With i.i.d. windows, SIGReg can be satisfied by between-episode variation
+    alone; grouping forces embeddings to also spread within an episode.
+    Every window is still visited once per epoch.
+    """
+
+    def __init__(self, subset, batch_size: int, windows_per_episode: int, generator=None):
+        clips = subset.dataset.clip_indices
+        groups = {}
+        for pos, idx in enumerate(subset.indices):
+            groups.setdefault(clips[idx][0], []).append(pos)
+        self.groups = list(groups.values())
+        self.batch_size = batch_size
+        self.k = windows_per_episode
+        self.generator = generator
+        self.n_batches = sum(len(g) for g in self.groups) // batch_size
+
+    def __len__(self):
+        return self.n_batches
+
+    def __iter__(self):
+        chunks = []
+        for g in self.groups:
+            perm = torch.randperm(len(g), generator=self.generator).tolist()
+            g = [g[i] for i in perm]
+            chunks += [g[i : i + self.k] for i in range(0, len(g), self.k)]
+        order = torch.randperm(len(chunks), generator=self.generator).tolist()
+        batch = []
+        for i in order:
+            batch += chunks[i]
+            while len(batch) >= self.batch_size:
+                yield batch[: self.batch_size]
+                batch = batch[self.batch_size :]
+
 
 class SaveCkptCallback(Callback):
     """Callback to save model checkpoint after each epoch using save_pretrained.

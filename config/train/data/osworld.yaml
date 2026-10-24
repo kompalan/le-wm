@@ -1,0 +1,18 @@
+dataset:
+  num_steps: ${eval:'${num_preds} + ${history_size}'}
+  frameskip: 1  # one OSWorld step is one agent action (possibly several sub-actions)
+  name: osworld_v1.h5
+  keys_to_load:
+    - pixels
+    - action
+    - page_changed  # pointer- and clock-free change mask for the within-episode losses
+  keys_to_cache:
+    - action
+    - page_changed
+# the encoded actions are already in about [-1, 1]; z-scoring blows up rare one-hot columns
+no_normalize:
+  - action
+# validate on whole tasks never seen in training (frac of the distinct task_idx values); 0 = random window split
+holdout:
+  col: task_idx
+  frac: 0.1

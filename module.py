@@ -1,3 +1,4 @@
+import math
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -187,14 +188,28 @@ class Transformer(nn.Module):
         return x
 
 class Embedder(nn.Module):
+    """Action encoder. With fourier_freqs > 0, the action columns in coord_idx
+    (screen coordinates in [-1, 1]) also get sin/cos features at frequencies
+    2^0..2^(fourier_freqs-1) * pi, each zeroed where coord_mask_idx (a presence
+    flag column) is 0, so the encoder can respond non-linearly to where a click is."""
+
     def __init__(
         self,
         input_dim=10,
         smoothed_dim=10,
         emb_dim=10,
         mlp_scale=4,
+        fourier_freqs=0,
+        coord_idx=None,
+        coord_mask_idx=None,
     ):
         super().__init__()
+        self.fourier_freqs = fourier_freqs
+        if fourier_freqs:
+            self.register_buffer("coord_idx", torch.as_tensor(coord_idx), persistent=False)
+            self.register_buffer("coord_mask_idx", torch.as_tensor(coord_mask_idx), persistent=False)
+            self.register_buffer("freqs", math.pi * 2.0 ** torch.arange(fourier_freqs), persistent=False)
+            input_dim = input_dim + 2 * fourier_freqs * len(coord_idx)
         self.patch_embed = nn.Conv1d(input_dim, smoothed_dim, kernel_size=1, stride=1)
         self.embed = nn.Sequential(
             nn.Linear(smoothed_dim, mlp_scale * emb_dim),
@@ -207,6 +222,10 @@ class Embedder(nn.Module):
         x: (B, T, D)
         """
         x = x.float()
+        if self.fourier_freqs:
+            ang = x[..., self.coord_idx, None] * self.freqs  # (B, T, C, F)
+            mask = x[..., self.coord_mask_idx, None]
+            x = torch.cat([x, (ang.sin() * mask).flatten(-2), (ang.cos() * mask).flatten(-2)], -1)
         x = x.permute(0, 2, 1)
         x = self.patch_embed(x)
         x = x.permute(0, 2, 1)

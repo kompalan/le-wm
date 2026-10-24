@@ -1,0 +1,9 @@
+dataset:
+  num_steps: ${eval:'${num_preds} + ${history_size}'}
+  frameskip: 1  # one MiniWoB step is already one discrete click
+  name: miniwob_click.h5
+  keys_to_load:
+    - pixels
+    - action
+  keys_to_cache:
+    - action

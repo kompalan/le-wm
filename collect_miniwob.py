@@ -27,7 +27,7 @@ import hdf5plugin
 import numpy as np
 import stable_worldmodel as swm
 
-from miniwob_env import TASKS, MiniWoBClickEnv
+from miniwob_env import TASKS, MiniWoBClickEnv, page_changed
 
 TRAIN_SEED_OFFSET = 0
 EVAL_SEED_OFFSET = 1_000_000  # demo_miniwob.py evaluates on seeds from here
@@ -35,7 +35,8 @@ EVAL_SEED_OFFSET = 1_000_000  # demo_miniwob.py evaluates on seeds from here
 
 def rollout(env, seed, rng, max_steps, p_expert, p_element):
     frame, _ = env.reset(seed=seed)
-    frames, actions, sources = [frame], [], []
+    frames, actions, sources, changed = [frame], [], [], []
+    clean = env.clean_frame
     for _ in range(max_steps):
         u = rng.random()
         action, src = None, "uniform"
@@ -55,22 +56,26 @@ def rollout(env, seed, rng, max_steps, p_expert, p_element):
         frames.append(frame)
         actions.append(action)
         sources.append(src)
+        # did the page itself change (ignoring the drawn pointer)?
+        changed.append(float(page_changed(clean, env.clean_frame)))
+        clean = env.clean_frame
 
     actions.append(np.full(2, np.nan, dtype=np.float32))
     sources.append("none")
-    return np.stack(frames), np.stack(actions).astype(np.float32), sources
+    changed.append(np.nan)
+    return np.stack(frames), np.stack(actions).astype(np.float32), sources, np.array(changed, np.float32)
 
 
 def worker(args):
     task, seeds, cfg = args
-    env = MiniWoBClickEnv(task, img_size=cfg["img_size"])
+    env = MiniWoBClickEnv(task, img_size=cfg["img_size"], hide_text=cfg["hide_text"], draw_cursor=cfg["draw_cursor"])
     rng = np.random.default_rng(seeds[0])
     episodes = []
     try:
         for seed in seeds:
-            pixels, action, src = rollout(env, int(seed), rng, cfg["max_steps"], cfg["p_expert"], cfg["p_element"])
+            pixels, action, src, changed = rollout(env, int(seed), rng, cfg["max_steps"], cfg["p_expert"], cfg["p_element"])
             if len(pixels) >= cfg["min_len"]:
-                episodes.append(dict(task=task, seed=int(seed), pixels=pixels, action=action, src=src))
+                episodes.append(dict(task=task, seed=int(seed), pixels=pixels, action=action, src=src, page_changed=changed))
     finally:
         env.close()
     return episodes
@@ -85,6 +90,8 @@ class Writer:
         S = (img_size, img_size, 3)
         self.f.create_dataset("pixels", (0, *S), np.uint8, maxshape=(None, *S), chunks=(1, *S), **blosc)
         self.f.create_dataset("action", (0, 2), np.float32, maxshape=(None, 2))
+        # 1 if the page (not the drawn pointer) changed between step t and t+1
+        self.f.create_dataset("page_changed", (0,), np.float32, maxshape=(None,))
         for col in ("ep_idx", "step_idx", "task_idx", "seed", "is_expert"):
             self.f.create_dataset(col, (0,), np.int64, maxshape=(None,))
         self.f.create_dataset("ep_len", (0,), np.int32, maxshape=(None,))
@@ -99,6 +106,7 @@ class Writer:
         cols = {
             "pixels": ep["pixels"],
             "action": ep["action"],
+            "page_changed": ep["page_changed"],
             "ep_idx": np.full(T, self.n_eps),
             "step_idx": np.arange(T),
             "task_idx": np.full(T, TASKS.index(ep["task"])),
@@ -130,10 +138,13 @@ def main():
     p.add_argument("--workers", type=int, default=8)
     p.add_argument("--chunk", type=int, default=50, help="episodes per worker job")
     p.add_argument("--name", default="miniwob_click", help="written to $STABLEWM_HOME/datasets/<name>.h5")
+    p.add_argument("--hide-text", action="store_true", help="render all page text transparent (diagnostic)")
+    p.add_argument("--draw-cursor", action="store_true", help="draw a mouse pointer at the last click in observations")
     args = p.parse_args()
 
     cfg = dict(img_size=args.img_size, max_steps=args.max_steps, min_len=args.min_len,
-               p_expert=args.p_expert, p_element=args.p_element)
+               p_expert=args.p_expert, p_element=args.p_element, hide_text=args.hide_text,
+               draw_cursor=args.draw_cursor)
     jobs = []
     for task in args.tasks:
         seeds = TRAIN_SEED_OFFSET + np.arange(args.episodes_per_task)

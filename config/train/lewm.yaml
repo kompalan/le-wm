@@ -14,6 +14,7 @@ hf_hub:
 
 num_workers: 6
 train_split: 0.9
+windows_per_episode: null  # int: build batches from chunks of this many same-episode windows
 seed: 3072
 img_size: 224
 embed_dim: 192
@@ -46,3 +47,12 @@ loss:
     kwargs:
       knots: 17
       num_proj: 1024
+  # VICReg variance/covariance on within-episode changes z_{t+1} - z_t
+  # (only transitions whose pixels changed); 0 disables
+  delta_vicreg:
+    var_weight: 0.0
+    cov_weight: 0.0
+    gamma: 1.0
+  # SIGReg (same test as above) on the same within-episode changes; 0 disables
+  delta_sigreg:
+    weight: 0.0

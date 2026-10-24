@@ -22,7 +22,8 @@ import miniwob
 import numpy as np
 from gymnasium import spaces
 from miniwob.action import ActionSpaceConfig, ActionTypes
-from PIL import Image
+from miniwob.screenshot import get_screenshot, pil_to_numpy_array
+from PIL import Image, ImageDraw
 
 gym.register_envs(miniwob)
 
@@ -52,6 +53,45 @@ return JSON.stringify({
 """
 
 
+# Diagnostic variant: make all text transparent (instruction, labels, tab
+# titles, links) while keeping the layout and widget state visible.
+# Replace the episode's 10 s timer with one that never fires in practice (~11
+# days). EPISODE_MAX_TIME also scales time-proportional rewards to ~1.
+_NO_TIMEOUT_JS = """
+core.EPISODE_MAX_TIME = 1e9;
+if (core.EP_TIMER !== null) {
+  clearTimeout(core.EP_TIMER);
+  core.EP_TIMER = setTimeout(function () { core.endEpisode(-1, false, 'timed out'); }, 1e9);
+}
+"""
+
+_HIDE_TEXT_JS = """
+if (!document.getElementById('hide-text')) {
+  const s = document.createElement('style');
+  s.id = 'hide-text';
+  s.textContent = '* { color: transparent !important; text-shadow: none !important; }';
+  document.head.appendChild(s);
+}
+"""
+
+
+# Mouse pointer drawn at the last click (draw_cursor=True), tip at (0, 0),
+# in task-area pixels; roughly a standard 12 px arrow.
+_ARROW = [(0, 0), (0, 12), (3, 9), (5, 14), (7, 13), (5, 8), (9, 8)]
+
+
+def draw_arrow(screenshot: np.ndarray, xy) -> np.ndarray:
+    img = Image.fromarray(screenshot)
+    x, y = float(xy[0]), float(xy[1])
+    ImageDraw.Draw(img).polygon([(x + dx, y + dy) for dx, dy in _ARROW], fill="black", outline="white")
+    return np.asarray(img)
+
+
+def page_changed(a: np.ndarray, b: np.ndarray, thr: int = 30, min_px: int = 10) -> bool:
+    """>min_px pixels differ by >thr in some channel (same test as the probes)."""
+    return bool(((np.abs(a.astype(np.int16) - b.astype(np.int16)).max(-1) > thr).sum()) > min_px)
+
+
 def to_frame(screenshot: np.ndarray, img_size: int) -> np.ndarray:
     """(210, 160, 3) screenshot -> white-padded square (img_size, img_size, 3)."""
     h, w, _ = screenshot.shape
@@ -73,12 +113,23 @@ def raw_coords(action) -> np.ndarray:
     return np.array([(a[0] + 1) / 2 * TASK_W, (a[1] + 1) / 2 * TASK_H], dtype=np.float32)
 
 
+def frame_coords(action, img_size: int) -> np.ndarray:
+    """Action in [-1, 1] -> (x, y) pixel in the square observation frame."""
+    x, y = raw_coords(action)
+    pad = (TASK_H - TASK_W) // 2  # to_frame pads the width to a square
+    return np.array([(x + pad), y]) * img_size / TASK_H
+
+
 class MiniWoBClickEnv(gym.Env):
     metadata = {"render_modes": ["rgb_array"], "render_fps": 2}
 
-    def __init__(self, task: str = "click-checkboxes", img_size: int = 224, render_mode: str = "rgb_array"):
+    def __init__(self, task: str = "click-checkboxes", img_size: int = 224, render_mode: str = "rgb_array",
+                 hide_text: bool = False, draw_cursor: bool = False):
         assert task in TASKS, f"unsupported task {task!r}, choose from {TASKS}"
         self.task = task
+        self.hide_text = hide_text
+        self.draw_cursor = draw_cursor  # observations show a pointer at the last click
+        self._cursor = None
         self.img_size = img_size
         self.render_mode = render_mode
         self.env_name = f"MiniWoB/{task}"
@@ -105,23 +156,44 @@ class MiniWoBClickEnv(gym.Env):
         # jQuery UI animates accordions/tabs; disable so the screenshot after a
         # click shows the settled page.
         self.driver.execute_script("if (window.jQuery) jQuery.fx.off = true;")
+        # MiniWoB fails an episode 10 s of wall-clock time after reset, so a slow
+        # planner (or a loaded machine) fails regardless of its clicks
+        self.driver.execute_script(_NO_TIMEOUT_JS)
         self._fields = dict(obs["fields"])
         self._utterance = obs["utterance"]
         self._visited_tabs = set()
         self.done = False
-        self._frame = to_frame(obs["screenshot"], self.img_size)
+        screenshot = obs["screenshot"]
+        if self.hide_text:
+            self.driver.execute_script(_HIDE_TEXT_JS)
+            screenshot = self._screenshot()  # the reset observation predates the style
+        self._cursor = None  # no click yet, so no pointer
+        self._set_frames(screenshot)
         return self._frame, self._get_info(reward=0.0)
 
     def step(self, action):
         if self.done:
             raise RuntimeError("step() called on a finished episode; call reset()")
-        a = self._env.unwrapped.create_action(ActionTypes.CLICK_COORDS, coords=raw_coords(action))
+        coords = raw_coords(action)
+        a = self._env.unwrapped.create_action(ActionTypes.CLICK_COORDS, coords=coords)
         obs, reward, terminated, truncated, _ = self._env.step(a)
         self.done = terminated or truncated
         if not self.done:
             # after termination miniwob returns the blank post-task page
-            self._frame = to_frame(obs["screenshot"], self.img_size)
+            self._cursor = coords
+            self._set_frames(obs["screenshot"])
         return self._frame, float(reward), terminated, truncated, self._get_info(reward=float(reward))
+
+    def _set_frames(self, screenshot):
+        self.clean_frame = to_frame(screenshot, self.img_size)  # page only, never a pointer
+        if self.draw_cursor and self._cursor is not None:
+            screenshot = draw_arrow(screenshot, self._cursor)
+        self._frame = to_frame(screenshot, self.img_size)
+
+    def _screenshot(self):
+        inst = self._env.unwrapped.instance
+        img = get_screenshot(self.driver, inst.inner_width, inst.inner_height, inst.task_width, inst.task_height)
+        return pil_to_numpy_array(img)
 
     def render(self):
         return self._frame
